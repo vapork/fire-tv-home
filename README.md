@@ -1,166 +1,136 @@
-# fire-tv-cleanup
+# Fire TV Home
 
-**Your TV, minus the ads.** Debloat an Android TV, Google TV or Fire TV over ADB and give it a
-clean launcher with a macOS-style dock. Hand the prompt to Claude Code or any coding assistant,
-answer a few questions about which apps you use, and it does the rest on the real TV.
+A clean, ad-free home screen for Amazon Fire TV — no Amazon launcher, no sponsored rows, no
+recommendation carousel. Built as a native Android launcher and tested on a **Fire TV Stick 4K
+(1st gen, AFTMM) running Fire OS 6.7.1.1 / Android 7.1.2**, where Amazon's own launcher is
+disabled-in-place and a lightweight TV home takes its place on the Home key.
 
-Forked from [Gathin23/tv-vibehack](https://github.com/Gathin23/tv-vibehack), which covers Android TV
-and Google TV. This fork adds Fire TV support and the launcher features listed below.
+![Home on a bright wallpaper](docs/showcase/01-home-light.jpg)
 
-![Fire TV home screen with ads (top) and the launcher (bottom)](docs/firetv-home-before-after.jpg)
+## Why this exists
 
-Everything is reversible: packages are disabled, never uninstalled, and a restore script puts the
-stock launcher back.
+Amazon's Fire TV home is an advertising surface. The stock launcher cannot simply be replaced:
+Fire OS ignores the default-home setting, refuses to bind third-party accessibility services, and
+does not deliver `BOOT_COMPLETED` to sideloaded apps. This launcher works with those restrictions
+instead of against them:
 
-## Quick start
+- **Home key** — a foreground service watches `logcat` for Amazon's home screen and raises this
+  launcher with `AppTask.moveToFront()`. Lands in **well under a second**.
+- **After a reboot** — a persisted `JobScheduler` job is rescheduled by the system and restarts the
+  redirect, so the launcher comes back without any adb help.
+- **Recovery** — the launcher also registers as a leanback app, so it can always be opened from the
+  app list.
 
-1. On the TV: Settings → Device Preferences → About → press OK on **Build** seven times → back →
-   Developer options → turn on **USB debugging** (and Network/ADB debugging if your TV shows it).
-   Keep the TV on and on the same Wi-Fi as your computer.
-2. Open Claude Code (or your assistant of choice) on your computer and paste the prompt from
-   [`PROMPT.md`](PROMPT.md), filling in your TV model.
-3. Accept the "Allow USB debugging?" prompt on the TV when told to, then answer the checklist
-   questions (which apps you use, which four go in the dock).
+## Features
 
-That's it. The assistant backs up, debloats, builds and installs the launcher, and verifies each
-step with screenshots from the TV. If you'd rather do it by hand, the pieces are below.
+### A real dock, with a picker
 
-## What's in the repo
+The dock holds up to 12 apps and is edited on the TV: press **+** to tick apps in the order you want
+them, or long-press a tile to pin, unpin or move it. Spacing is computed from the measured width, so
+icons keep equal cells at any count instead of overlapping.
 
-| Path | What it is |
-|---|---|
-| [`PROMPT.md`](PROMPT.md) | The prompt. Brand-neutral; the assistant discovers your TV's bloat. |
-| [`launcher/`](launcher/) | The tvOS-style launcher. Edit `app/src/main/res/values/config.xml` for your dock, hidden apps and Live TV package, then run `build-and-install.sh`. |
-| [`tools/tv.py`](tools/tv.py) | Pure-Python ADB client (shell, batch, push, pull). Works where the stock `adb` is blocked. |
-| [`tools/b64push.py`](tools/b64push.py) | Uploads larger files (APKs) as base64 chunks with an md5 check. |
-| [`tools/disable.sh`](tools/disable.sh), [`tools/restore.sh`](tools/restore.sh) | Apply or undo a debloat list. |
-| [`examples/`](examples/) | Per-TV debloat lists. Add yours, see [CONTRIBUTING.md](CONTRIBUTING.md). |
+![Dock](docs/showcase/03-dock.jpg)
 
-## The launcher
+### Weather at a glance
 
-A small native Android TV home screen (`com.gathin.tvhome`), built for sets with 1 GB of RAM:
+Current conditions sit next to the greeting (Open-Meteo, no API key), with the location resolved once
+from the network and cached. The screensaver adds today's high and low.
 
-- A full-screen photo that changes with the time of day: morning, afternoon, evening and night.
-  The greeting changes with it ("Good evening, Alex").
-- A macOS-style dock of up to four apps with square icons. The focused icon grows and lifts, its
-  neighbours grow a little, and a capsule label shows its name. Press Down for the rest of your
-  apps.
-- Pin, unpin and reorder dock apps on the TV: hold OK or press Menu on an app.
-- Round buttons top right: **Inputs** (HDMI ports, AV and Live TV), **Wi-Fi** (signal bars, plus a
-  warning when there is no internet) and **Settings**. Greeting, clock and date top left, set in
-  [Open Sans](https://fonts.google.com/specimen/Open+Sans).
-- A screensaver of the same photos with a slow zoom, a crossfade every 20 seconds and a clock.
+### Wallpapers that rotate
 
-Configure it in [`launcher/app/src/main/res/values/config.xml`](launcher/app/src/main/res/values/config.xml):
-the starting dock, hidden apps, Live TV package and columns. To put your name in the greeting, add
-`tvhome.userName=Alex` to `launcher/local.properties`. The YouTube, Netflix, Prime Video and AirPlay
-dock icons are trademarked logos, so they are not in the repo. Draw them locally with
-[`tools/make_dock_icons.py`](tools/make_dock_icons.py). Apps without one show their own icon.
-Build and install with
+Choose a source in **gear → Wallpaper**:
 
-```bash
-TV_HOST=192.168.1.50 launcher/build-and-install.sh
-```
+| Source | What it is |
+| --- | --- |
+| Time of day | Four photos, swapped morning / afternoon / evening / night |
+| Bundled | Twelve photos shipped with the app |
+| Random | Any image from `picsum.photos` — no key, thousands of options |
+| My photos | `.jpg` / `.png` files you push to the app's own folder |
 
-Needs JDK 17 and the Android SDK (platform 34, build-tools 34.0.0). On macOS:
-`brew install openjdk@17 android-commandlinetools && sdkmanager "platforms;android-34" "build-tools;34.0.0"`.
+Set how often it changes, one minute at a time. The screensaver follows both choices.
 
-## Talking to the TV by hand
+![Wallpaper settings](docs/showcase/05-wallpapers.jpg)
 
-```bash
-python3 -m venv tools/venv && tools/venv/bin/pip install -r tools/requirements.txt
-export TV_HOST=192.168.1.50                                   # your TV's IP
-tools/venv/bin/python -I tools/tv.py --probe                 # model, Android version, firmware
-tools/venv/bin/python -I tools/tv.py 'pm list packages'      # one command
-printf 'cmd1\ncmd2\n' | tools/venv/bin/python -I tools/tv.py --batch
-tools/disable.sh examples/xiaomi-mi-tv-4a/debloat.txt        # apply a list
-tools/restore.sh examples/xiaomi-mi-tv-4a/debloat.txt        # undo it, restore stock launcher
-```
+### Readable on any photo
 
-### Gotchas we hit
+Every wallpaper is sampled for average brightness, and the whole UI flips: dark text and icons over
+bright photos, white over dark ones, with the scrim, the pill faces and the focus states all
+matching.
 
-- **macOS: `adb connect` says "No route to host"** while the port is clearly open. Recent macOS
-  treats the Google-signed `adb` as its own app under Local Network privacy and silently blocks it.
-  `tools/tv.py` avoids the binary entirely.
-- **No "wireless debugging" toggle** on some TVs (Xiaomi among them). USB debugging alone opens
-  network ADB on port 5555.
-- **Chained `pm` commands** (`pm disable a; pm disable b`) may silently stop after the first. Run
-  one per shell call; `--batch` does this.
-- **Large pushes hang** through the Python client. Use `tools/b64push.py` for APKs.
-- **Disable the stock launcher only after the new one is installed**, or the Home button lands on
-  a factory test app.
-- **Third-party launchers** often charge for basics like a custom wallpaper. Hence `launcher/`.
-- **No on-screen keyboard** after switching launchers (seen on Xiaomi): the default input method
-  pointed at a Baidu IME that isn't installed. Fix with
-  `tools/tv.py 'ime set com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME'`.
+![Home on a dark wallpaper](docs/showcase/02-home-dark.jpg)
 
-## Fire TV
+### A screensaver that belongs to the same system
 
-Fire OS is Android underneath, but it guards its home screen. Tested on a Hisense Fire TV Edition
-(Fire OS 8, Android 11, model AFTOLCBC82).
+Same photo source, same interval, plus a large clock with AM/PM and today's weather — with the same
+contrast switching.
 
-![Amazon screensaver (top) and the launcher's screensaver (bottom)](docs/firetv-screensaver-before-after.jpg)
+![Screensaver](docs/showcase/07-screensaver.jpg)
 
-To set it up:
+### Settings that actually open
 
-1. On the TV, open **Settings → Device & Software → About**, select the device name seven times,
-   then go back to **Developer Options** and turn on **ADB debugging**.
-2. Run `TV_HOST=<tv ip> launcher/build-and-install.sh`. On Fire TV it installs the launcher, turns
-   on its Home redirect and sets its screensaver. It leaves Amazon's launcher alone.
-3. Optional: disable the ad and telemetry packages with
-   `tools/disable.sh examples/hisense-fire-tv-AFTOLCBC82/debloat.txt`.
+Fire OS sends `android.settings.SETTINGS` to a dummy handler and guards most screens with signature
+permissions. The gear opens a popup with the screens that an app *can* start — Wi-Fi, Applications,
+My Fire TV, Controllers & Bluetooth, Wallpaper — with Amazon's home as the escape hatch for the rest.
 
-How it differs from Android TV:
+![Settings popup](docs/showcase/04-settings.jpg)
 
-- **Amazon's launcher stays.** Fire OS ignores the default-home setting, and Amazon's launcher also
-  hosts Settings. Disabling it locks you out of Settings. The launcher's `HomeRedirectService`
-  opens the launcher whenever Amazon's home screen comes up, so Amazon's screen shows for a moment
-  before yours.
-- **Settings keeps working.** Amazon's home screen also flashes up on the way into Settings, right
-  after a window from Amazon's settings app. The redirect leaves that flash alone.
-- **To turn the redirect off on the TV,** press Menu on the launcher's Settings button and choose
-  **Use Amazon Home Screen**.
-- **ADB turns off when the TV restarts.** Turn **ADB debugging** back on in Developer Options
-  before you connect again.
-- **Some packages are protected.** Fire OS refuses to disable the four packages listed in the
-  example debloat list. Undo the rest with `tools/restore.sh` and the same list.
-- **AirPlay has no screen of its own.** The AirPlay tile opens nothing, and casting from an iPhone
-  works anyway.
+![App picker](docs/showcase/06-app-picker.jpg)
 
-### Fire OS 6 (Android 7.1.2)
+### Fewer ads
 
-Tested on a Fire TV Stick 4K 1st gen (AFTMM, Fire OS 6.7.1.1). Three things the Fire OS 8 setup relies
-on do not work there, so this fork adds fallbacks:
+The repository ships `examples/amazon-fire-tv-stick-4k-1stgen-AFTMM/debloat.txt`: sixteen ad,
+telemetry and unused-app packages, disabled per user (never uninstalled) with a restore script.
 
-- **The accessibility redirect does not bind.** Amazon's `AmazonAccessibilityManagerService` only
-  trusts services it knows and logs `A11yAuthorizer trust=false` for sideloaded apps. `HomeRedirectService`
-  therefore watches `logcat ActivityManager:I *:S` for Amazon's home screen instead, which needs
-  `pm grant com.gathin.tvhome android.permission.READ_LOGS` (granted over adb; it survives reboots).
-  Home is raised with `AppTask.moveToFront()` and lands in well under a second.
-- **`BOOT_COMPLETED` is not delivered to sideloaded apps**, so a persisted `JobScheduler` job restarts
-  the redirect after a reboot; the launcher also registers as a leanback app so it stays reachable.
-- **`android.settings.SETTINGS` hits a dummy handler** and Fire OS guards most settings screens with
-  signature permissions, so the gear opens a popup with the screens an app may start (Wi-Fi,
-  Applications, My Fire TV, Controllers & Bluetooth, Wallpaper), plus Amazon's home as the escape hatch.
+## Install (Fire OS 6)
 
-Also on this device: `minSdk` is 25, so the variable font's weights are baked into static instances
-(`open_sans_light`, `open_sans_medium`), and the launcher adds weather next to the greeting, wallpaper
-sources with rotation (bundled photos, picsum.photos, or your own folder), and text/icons that switch
-between dark and light according to the wallpaper's brightness. The screensaver uses the same photo
-source and rotation interval, with a larger clock, AM/PM and today's high/low beside it.
+1. On the TV: **Settings → My Fire TV → About**, select the device name seven times, then
+   **Developer Options → ADB debugging → ON**.
+2. Build and install:
+   ```bash
+   cd launcher
+   echo "sdk.dir=/path/to/Android/Sdk" > local.properties
+   ./gradlew assembleDebug
+   adb connect <tv-ip>:5555
+   adb install -r app/build/outputs/apk/debug/app-debug.apk
+   ```
+3. Grant the log access the redirect needs (survives reboots):
+   ```bash
+   adb shell pm grant com.gathin.tvhome android.permission.READ_LOGS
+   ```
+4. Use it as the screensaver, and start the redirect:
+   ```bash
+   adb shell settings put secure screensaver_components com.gathin.tvhome/com.gathin.tvhome.PhotoDream
+   adb shell am startservice -n com.gathin.tvhome/.HomeRedirectService
+   ```
+5. Press **Home**. To go back to Amazon's home screen at any time, press **Menu** on the Settings
+   pill and choose *Use Amazon Home Screen*.
 
-## Supported TVs
+Requires JDK 17+ and Android SDK platform 34. `minSdk` is 25 (Android 7.1).
 
-Android TV and Google TV: Xiaomi/Redmi, TCL, Hisense, Sony, OnePlus, Realme, Nvidia Shield and most
-others. Fire TV: see [Fire TV](#fire-tv). Not Samsung Tizen or LG webOS. Tested so far on the models
-in [`examples/`](examples/).
+## Remote controls
 
-## Contributing
+| Input | Action |
+| --- | --- |
+| Home | This launcher |
+| D-pad / OK | Move and open tiles |
+| Down from the dock | App grid |
+| **+** pill | Pick dock apps |
+| Gear pill | Settings popup |
+| Menu on the gear | Toggle the Home redirect |
+| Long-press a tile | Pin / unpin / move |
 
-Add your TV's debloat list, improve the launcher, or sharpen the prompt. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+## Notes and limitations
 
-## Licence
+- Home detection matches Amazon's ActivityManager log lines, so it is Fire OS 6 version-sensitive.
+- The screensaver rotates on the wallpaper interval; at long intervals that is one photo per sleep.
+- The UI strings are English only.
+- Trademarked dock artwork is not included; icons come from each installed app.
 
-MIT, see [`LICENSE`](LICENSE). The Outfit and Open Sans typefaces are under the SIL Open Font
-License, see `launcher/FONT-LICENSE-OFL.txt`. Photo credits are in [`CREDITS.md`](CREDITS.md).
+## Credits
+
+Built on [Gathin23/tv-vibehack](https://github.com/Gathin23/tv-vibehack) via
+[itsmeterrylin/fire-tv-cleanup](https://github.com/itsmeterrylin/fire-tv-cleanup), which provides the
+original launcher, screensaver and debloat tooling. Fire OS 6 support, weather, wallpaper sources,
+contrast switching, the dock picker and the screensaver work in this repository were added on top.
+
+MIT licensed — see [LICENSE](LICENSE).
